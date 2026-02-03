@@ -137,9 +137,11 @@ model ExamFile {
 model QuestionBank {
   id        Int      @id @default(autoincrement())
   profesorId Int
+  titulo    String   @default("Sin título")
   texto     String
   opciones  Json
   correcta  Int
+  tags      Json     @default("[]")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   profesor  User     @relation(fields: [profesorId], references: [id])
