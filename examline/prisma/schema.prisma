@@ -18,6 +18,7 @@ model User {
   examHistory   ExamHistory[]
   inscripciones Inscription[]
   examFiles     ExamFile[]
+  questionBank  QuestionBank[]
 }
 
 model Exam {
@@ -131,4 +132,15 @@ model ExamFile {
   user      User     @relation(fields: [userId], references: [id])
 
   @@unique([examId, userId, filename, version])
+}
+
+model QuestionBank {
+  id        Int      @id @default(autoincrement())
+  profesorId Int
+  texto     String
+  opciones  Json
+  correcta  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  profesor  User     @relation(fields: [profesorId], references: [id])
 }
