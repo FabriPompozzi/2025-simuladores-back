@@ -62,7 +62,7 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
           userId_examId_examWindowId: {
             userId,
             examId,
-            examWindowId: examWindowId || null
+            examWindowId: examWindowId ?? null // Usar nullish coalescing para manejar undefined correctamente
           }
         }
       });
@@ -71,18 +71,60 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
         return res.json(existingAttempt);
       }
 
-      // Crear nuevo intento
-      const attempt = await prisma.examAttempt.create({
-        data: {
-          userId,
-          examId,
-          examWindowId: examWindowId || null,
-          respuestas: {},
-          estado: "en_progreso"
-        }
+      // Obtener el examen para verificar si tiene orden aleatorio
+      const exam = await prisma.exam.findUnique({
+        where: { id: examId },
+        include: { preguntas: true }
       });
 
-      res.json(attempt);
+      if (!exam) {
+        return res.status(404).json({ error: "Examen no encontrado" });
+      }
+
+      // Preparar datos del intento
+      const attemptData: any = {
+        userId,
+        examId,
+        examWindowId: examWindowId ?? null,
+        respuestas: {},
+        estado: "en_progreso"
+      };
+
+      // Si el examen tiene orden aleatorio, generar y guardar el orden randomizado
+      if (exam.ordenAleatorio && exam.preguntas && exam.preguntas.length > 0) {
+        // Crear array de IDs y randomizar usando Fisher-Yates
+        const preguntaIds = exam.preguntas.map(p => p.id);
+        for (let i = preguntaIds.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [preguntaIds[i], preguntaIds[j]] = [preguntaIds[j], preguntaIds[i]];
+        }
+        attemptData.ordenPreguntas = preguntaIds;
+      }
+
+      // Crear nuevo intento con manejo de race condition
+      try {
+        const attempt = await prisma.examAttempt.create({
+          data: attemptData
+        });
+        res.json(attempt);
+      } catch (createError: any) {
+        // Si falla por constraint único (race condition), buscar el intento existente
+        if (createError.code === 'P2002') {
+          const retryAttempt = await prisma.examAttempt.findUnique({
+            where: {
+              userId_examId_examWindowId: {
+                userId,
+                examId,
+                examWindowId: examWindowId ?? null
+              }
+            }
+          });
+          if (retryAttempt) {
+            return res.json(retryAttempt);
+          }
+        }
+        throw createError;
+      }
     } catch (error) {
       console.error('Error starting exam attempt:', error);
       res.status(500).json({ error: "Error iniciando intento de examen" });
@@ -238,7 +280,20 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
           updateData.testResults = testResults;
         }
       } else if (attempt.exam.tipo === 'multiple_choice') {
-        updateData.respuestas = respuestas || {};
+        // Guardar respuestas en la nueva tabla RespuestaEstudiante
+        if (respuestas && typeof respuestas === 'object') {
+          const respuestasArray = Object.entries(respuestas).map(([preguntaId, valor]) => ({
+            attemptId,
+            preguntaId: parseInt(preguntaId),
+            valor
+          }));
+
+          // Crear todas las respuestas en batch
+          await prisma.respuestaEstudiante.createMany({
+            data: respuestasArray,
+            skipDuplicates: true
+          });
+        }
         
         // Calcular puntaje automáticamente
         const exam = await prisma.exam.findUnique({
@@ -250,8 +305,10 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
           let correctas = 0;
           const totalPreguntas = exam.preguntas.length;
 
-          exam.preguntas.forEach((pregunta, index) => {
-            const respuestaEstudiante = respuestas?.[index];
+          // IMPORTANTE: Las respuestas ahora vienen con preguntaId como key (no índice)
+          // para soportar orden aleatorio de preguntas
+          exam.preguntas.forEach((pregunta) => {
+            const respuestaEstudiante = respuestas?.[pregunta.id];
             
             if (respuestaEstudiante === undefined || respuestaEstudiante === null) {
               // No respondió
@@ -431,7 +488,8 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
           exam: {
             include: { preguntas: true }
           },
-          examWindow: true
+          examWindow: true,
+          respuestas: true // Incluir respuestas del nuevo modelo
         }
       });
 
@@ -448,6 +506,12 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
       if (attempt.estado !== "finalizado") {
         return res.status(403).json({ error: "El intento debe estar finalizado para ver resultados" });
       }
+
+      // Convertir respuestas a formato legacy { preguntaId: valor }
+      const respuestasLegacy: any = {};
+      attempt.respuestas.forEach((resp) => {
+        respuestasLegacy[resp.preguntaId] = resp.valor;
+      });
 
       // Si es un examen de programación, incluir archivos guardados
       let examFiles: any[] = [];
@@ -473,6 +537,7 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
       // Agregar archivos al resultado
       const result = {
         ...attempt,
+        respuestas: respuestasLegacy, // Usar formato legacy para compatibilidad con frontend
         examFiles: examFiles
       };
 

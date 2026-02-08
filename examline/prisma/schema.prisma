@@ -26,6 +26,7 @@ model Exam {
   titulo                String
   profesorId            Int
   tipo                  String        @default("multiple_choice") // "multiple_choice" | "programming"
+  ordenAleatorio        Boolean       @default(false) // si las preguntas deben aparecer en orden aleatorio para cada estudiante
   lenguajeProgramacion  String?       // "python" | "javascript" (solo para exámenes de programación)
   intellisenseHabilitado Boolean      @default(false) // solo para exámenes de programación
   enunciadoProgramacion String?       // enunciado específico para exámenes de programación
@@ -53,6 +54,7 @@ model Pregunta {
                   // - matching: cantidad de conceptos (divide el array opciones)
   examId   Int
   exam     Exam   @relation(fields: [examId], references: [id])
+  respuestasEstudiante RespuestaEstudiante[] // Respuestas de estudiantes a esta pregunta
 }
 
 model ExamHistory {
@@ -114,7 +116,7 @@ model ExamAttempt {
   examWindowId Int?
   startedAt    DateTime    @default(now())
   finishedAt   DateTime?
-  respuestas   Json
+  ordenPreguntas Json?     // Array de IDs de preguntas en el orden randomizado para este intento
   codigoProgramacion String? // código del estudiante para exámenes de programación
   puntaje      Float?
   testResults  Json?       // resultados detallados de los test cases ejecutados
@@ -122,8 +124,22 @@ model ExamAttempt {
   examWindow   ExamWindow? @relation(fields: [examWindowId], references: [id])
   exam         Exam        @relation(fields: [examId], references: [id])
   user         User        @relation(fields: [userId], references: [id])
+  respuestas   RespuestaEstudiante[] // Respuestas del estudiante a cada pregunta
 
   @@unique([userId, examId, examWindowId])
+}
+
+model RespuestaEstudiante {
+  id         Int         @id @default(autoincrement())
+  attemptId  Int
+  preguntaId Int
+  valor      Json        // Puede ser un índice (Int) para multiple choice/true_false, o un array para fill_in_blank/matching
+  attempt    ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  pregunta   Pregunta    @relation(fields: [preguntaId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, preguntaId]) // Una respuesta por pregunta por intento
+  @@index([attemptId])
+  @@index([preguntaId])
 }
 
 model ExamFile {
