@@ -57,13 +57,12 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
       }
 
       // Verificar si ya existe un intento
-      const existingAttempt = await prisma.examAttempt.findUnique({
+      // Usar findFirst en lugar de findUnique para manejar mejor el null
+      const existingAttempt = await prisma.examAttempt.findFirst({
         where: {
-          userId_examId_examWindowId: {
-            userId,
-            examId,
-            examWindowId: examWindowId ?? null // Usar nullish coalescing para manejar undefined correctamente
-          }
+          userId,
+          examId,
+          examWindowId: examWindowId || null
         }
       });
 
@@ -110,13 +109,11 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
       } catch (createError: any) {
         // Si falla por constraint único (race condition), buscar el intento existente
         if (createError.code === 'P2002') {
-          const retryAttempt = await prisma.examAttempt.findUnique({
+          const retryAttempt = await prisma.examAttempt.findFirst({
             where: {
-              userId_examId_examWindowId: {
-                userId,
-                examId,
-                examWindowId: examWindowId ?? null
-              }
+              userId,
+              examId,
+              examWindowId: examWindowId || null
             }
           });
           if (retryAttempt) {
@@ -420,12 +417,21 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
     try {
       const examWindowId = windowId ? parseInt(windowId as string) : null;
       
+      // Construir where clause manejando null correctamente
+      const whereClause: any = {
+        userId,
+        examId
+      };
+      
+      // Solo agregar examWindowId si no es null
+      if (examWindowId !== null) {
+        whereClause.examWindowId = examWindowId;
+      } else {
+        whereClause.examWindowId = null;
+      }
+      
       const attempt = await prisma.examAttempt.findFirst({
-        where: {
-          userId,
-          examId,
-          examWindowId
-        }
+        where: whereClause
       });
 
       res.json({ hasAttempt: !!attempt, attempt });
