@@ -252,8 +252,53 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
 
           exam.preguntas.forEach((pregunta, index) => {
             const respuestaEstudiante = respuestas?.[index];
-            if (respuestaEstudiante !== undefined && respuestaEstudiante === pregunta.correcta) {
-              correctas++;
+            
+            if (respuestaEstudiante === undefined || respuestaEstudiante === null) {
+              // No respondió
+              return;
+            }
+
+            // Evaluar según el tipo de pregunta
+            if (pregunta.tipo === 'fill_in_blank') {
+              // Para fill_in_blank, la respuesta debe ser un array con los ÍNDICES de las respuestas correctas en orden
+              if (Array.isArray(respuestaEstudiante) && Array.isArray(pregunta.opciones)) {
+                // pregunta.correcta indica cuántas respuestas correctas hay
+                // Las primeras N opciones son las correctas (en orden)
+                const numRespuestasCorrectas = pregunta.correcta || 0;
+                const respuestasCorrectasTexto = pregunta.opciones.slice(0, numRespuestasCorrectas);
+                
+                // Verificar que el estudiante seleccionó el número correcto de opciones
+                if (respuestaEstudiante.length === numRespuestasCorrectas) {
+                  // Convertir los índices del estudiante a los textos de las respuestas
+                  const respuestasEstudianteTexto = respuestaEstudiante.map((indice: number) => {
+                    // Validar que el índice está en rango
+                    if (indice >= 0 && indice < pregunta.opciones.length) {
+                      return pregunta.opciones[indice];
+                    }
+                    return null;
+                  });
+                  
+                  // Verificar que cada respuesta esté en la posición correcta comparando los textos
+                  let todasCorrectas = true;
+                  for (let i = 0; i < numRespuestasCorrectas; i++) {
+                    const estudianteTexto = String(respuestasEstudianteTexto[i] || '').trim();
+                    const correctaTexto = String(respuestasCorrectasTexto[i] || '').trim();
+                    if (estudianteTexto !== correctaTexto) {
+                      todasCorrectas = false;
+                      break;
+                    }
+                  }
+                  
+                  if (todasCorrectas) {
+                    correctas++;
+                  }
+                }
+              }
+            } else {
+              // Para multiple_choice y true_false, comparar índice directamente
+              if (respuestaEstudiante === pregunta.correcta) {
+                correctas++;
+              }
             }
           });
 
