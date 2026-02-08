@@ -55,6 +55,7 @@ const ExamRoute = (prisma: PrismaClient) => {
       } else if (tipo === 'multiple_choice' && preguntas) {
         examData.preguntas = {
           create: preguntas.map((p: any) => ({
+            tipo: p.tipo || 'multiple_choice',
             texto: p.texto,
             correcta: p.correcta,
             opciones: p.opciones,

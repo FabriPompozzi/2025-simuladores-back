@@ -41,6 +41,7 @@ model Exam {
 
 model Pregunta {
   id       Int    @id @default(autoincrement())
+  tipo     String @default("multiple_choice")
   texto    String
   opciones Json
   correcta Int
@@ -137,6 +138,7 @@ model ExamFile {
 model QuestionBank {
   id        Int      @id @default(autoincrement())
   profesorId Int
+  tipo      String   @default("multiple_choice")
   titulo    String   @default("Sin título")
   texto     String
   opciones  Json
