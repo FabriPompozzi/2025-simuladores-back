@@ -62,7 +62,7 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
           userId_examId_examWindowId: {
             userId,
             examId,
-            examWindowId: examWindowId || null
+            examWindowId: examWindowId ?? null // Usar nullish coalescing para manejar undefined correctamente
           }
         }
       });
@@ -71,18 +71,60 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
         return res.json(existingAttempt);
       }
 
-      // Crear nuevo intento
-      const attempt = await prisma.examAttempt.create({
-        data: {
-          userId,
-          examId,
-          examWindowId: examWindowId || null,
-          respuestas: {},
-          estado: "en_progreso"
-        }
+      // Obtener el examen para verificar si tiene orden aleatorio
+      const exam = await prisma.exam.findUnique({
+        where: { id: examId },
+        include: { preguntas: true }
       });
 
-      res.json(attempt);
+      if (!exam) {
+        return res.status(404).json({ error: "Examen no encontrado" });
+      }
+
+      // Preparar datos del intento
+      const attemptData: any = {
+        userId,
+        examId,
+        examWindowId: examWindowId ?? null,
+        respuestas: {},
+        estado: "en_progreso"
+      };
+
+      // Si el examen tiene orden aleatorio, generar y guardar el orden randomizado
+      if (exam.ordenAleatorio && exam.preguntas && exam.preguntas.length > 0) {
+        // Crear array de IDs y randomizar usando Fisher-Yates
+        const preguntaIds = exam.preguntas.map(p => p.id);
+        for (let i = preguntaIds.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [preguntaIds[i], preguntaIds[j]] = [preguntaIds[j], preguntaIds[i]];
+        }
+        attemptData.ordenPreguntas = preguntaIds;
+      }
+
+      // Crear nuevo intento con manejo de race condition
+      try {
+        const attempt = await prisma.examAttempt.create({
+          data: attemptData
+        });
+        res.json(attempt);
+      } catch (createError: any) {
+        // Si falla por constraint único (race condition), buscar el intento existente
+        if (createError.code === 'P2002') {
+          const retryAttempt = await prisma.examAttempt.findUnique({
+            where: {
+              userId_examId_examWindowId: {
+                userId,
+                examId,
+                examWindowId: examWindowId ?? null
+              }
+            }
+          });
+          if (retryAttempt) {
+            return res.json(retryAttempt);
+          }
+        }
+        throw createError;
+      }
     } catch (error) {
       console.error('Error starting exam attempt:', error);
       res.status(500).json({ error: "Error iniciando intento de examen" });
@@ -238,7 +280,20 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
           updateData.testResults = testResults;
         }
       } else if (attempt.exam.tipo === 'multiple_choice') {
-        updateData.respuestas = respuestas || {};
+        // Guardar respuestas en la nueva tabla RespuestaEstudiante
+        if (respuestas && typeof respuestas === 'object') {
+          const respuestasArray = Object.entries(respuestas).map(([preguntaId, valor]) => ({
+            attemptId,
+            preguntaId: parseInt(preguntaId),
+            valor
+          }));
+
+          // Crear todas las respuestas en batch
+          await prisma.respuestaEstudiante.createMany({
+            data: respuestasArray,
+            skipDuplicates: true
+          });
+        }
         
         // Calcular puntaje automáticamente
         const exam = await prisma.exam.findUnique({
@@ -250,10 +305,86 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
           let correctas = 0;
           const totalPreguntas = exam.preguntas.length;
 
-          exam.preguntas.forEach((pregunta, index) => {
-            const respuestaEstudiante = respuestas?.[index];
-            if (respuestaEstudiante !== undefined && respuestaEstudiante === pregunta.correcta) {
-              correctas++;
+          // IMPORTANTE: Las respuestas ahora vienen con preguntaId como key (no índice)
+          // para soportar orden aleatorio de preguntas
+          exam.preguntas.forEach((pregunta) => {
+            const respuestaEstudiante = respuestas?.[pregunta.id];
+            
+            if (respuestaEstudiante === undefined || respuestaEstudiante === null) {
+              // No respondió
+              return;
+            }
+
+            // Evaluar según el tipo de pregunta
+            if (pregunta.tipo === 'fill_in_blank') {
+              // Para fill_in_blank, la respuesta debe ser un array con los ÍNDICES de las respuestas correctas en orden
+              if (Array.isArray(respuestaEstudiante) && Array.isArray(pregunta.opciones)) {
+                // pregunta.correcta indica cuántas respuestas correctas hay
+                // Las primeras N opciones son las correctas (en orden)
+                const numRespuestasCorrectas = pregunta.correcta || 0;
+                const respuestasCorrectasTexto = pregunta.opciones.slice(0, numRespuestasCorrectas);
+                
+                // Verificar que el estudiante seleccionó el número correcto de opciones
+                if (respuestaEstudiante.length === numRespuestasCorrectas) {
+                  // Convertir los índices del estudiante a los textos de las respuestas
+                  const respuestasEstudianteTexto = respuestaEstudiante.map((indice: number) => {
+                    // Validar que el índice está en rango
+                    if (indice >= 0 && indice < pregunta.opciones.length) {
+                      return pregunta.opciones[indice];
+                    }
+                    return null;
+                  });
+                  
+                  // Verificar que cada respuesta esté en la posición correcta comparando los textos
+                  let todasCorrectas = true;
+                  for (let i = 0; i < numRespuestasCorrectas; i++) {
+                    const estudianteTexto = String(respuestasEstudianteTexto[i] || '').trim();
+                    const correctaTexto = String(respuestasCorrectasTexto[i] || '').trim();
+                    if (estudianteTexto !== correctaTexto) {
+                      todasCorrectas = false;
+                      break;
+                    }
+                  }
+                  
+                  if (todasCorrectas) {
+                    correctas++;
+                  }
+                }
+              }
+            } else if (pregunta.tipo === 'matching') {
+              // Para matching, la respuesta es un array donde cada índice representa un concepto
+              // y el valor es el índice de la respuesta seleccionada
+              // Formato: [respuestaParaConcepto0, respuestaParaConcepto1, ...]
+              if (Array.isArray(respuestaEstudiante) && Array.isArray(pregunta.opciones)) {
+                const numConceptos = pregunta.correcta || 0;
+                
+                // Verificar que el estudiante respondió para todos los conceptos
+                if (respuestaEstudiante.length === numConceptos) {
+                  let todasCorrectas = true;
+                  
+                  // Verificar cada emparejamiento
+                  for (let i = 0; i < numConceptos; i++) {
+                    // La respuesta correcta para el concepto i es la que está en la posición (correcta + i)
+                    const indiceRespuestaCorrecta = numConceptos + i;
+                    const indiceRespuestaEstudiante = respuestaEstudiante[i];
+                    
+                    // Comparar los índices de las respuestas
+                    if (indiceRespuestaEstudiante !== indiceRespuestaCorrecta) {
+                      todasCorrectas = false;
+                      break;
+                    }
+                  }
+                  
+                  if (todasCorrectas) {
+                    correctas++;
+                  }
+                }
+              }
+            } else {
+              // Para multiple_choice y true_false, comparar índice directamente
+              if (respuestaEstudiante === pregunta.correcta) {
+                correctas++;
+              }
             }
           });
 
@@ -357,7 +488,8 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
           exam: {
             include: { preguntas: true }
           },
-          examWindow: true
+          examWindow: true,
+          respuestas: true // Incluir respuestas del nuevo modelo
         }
       });
 
@@ -374,6 +506,12 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
       if (attempt.estado !== "finalizado") {
         return res.status(403).json({ error: "El intento debe estar finalizado para ver resultados" });
       }
+
+      // Convertir respuestas a formato legacy { preguntaId: valor }
+      const respuestasLegacy: any = {};
+      attempt.respuestas.forEach((resp) => {
+        respuestasLegacy[resp.preguntaId] = resp.valor;
+      });
 
       // Si es un examen de programación, incluir archivos guardados
       let examFiles: any[] = [];
@@ -399,6 +537,7 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
       // Agregar archivos al resultado
       const result = {
         ...attempt,
+        respuestas: respuestasLegacy, // Usar formato legacy para compatibilidad con frontend
         examFiles: examFiles
       };
 

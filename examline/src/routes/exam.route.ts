@@ -10,7 +10,8 @@ const ExamRoute = (prisma: PrismaClient) => {
     const { 
       titulo, 
       preguntas, 
-      tipo = 'multiple_choice', 
+      tipo = 'multiple_choice',
+      ordenAleatorio = false,
       lenguajeProgramacion, 
       intellisenseHabilitado = false,
       enunciadoProgramacion,
@@ -42,6 +43,7 @@ const ExamRoute = (prisma: PrismaClient) => {
       const examData: any = {
         titulo,
         tipo,
+        ordenAleatorio,
         profesorId: req.user!.userId,
       };
 
@@ -55,6 +57,7 @@ const ExamRoute = (prisma: PrismaClient) => {
       } else if (tipo === 'multiple_choice' && preguntas) {
         examData.preguntas = {
           create: preguntas.map((p: any) => ({
+            tipo: p.tipo || 'multiple_choice',
             texto: p.texto,
             correcta: p.correcta,
             opciones: p.opciones,

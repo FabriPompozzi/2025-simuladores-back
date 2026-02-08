@@ -37,16 +37,17 @@ router.post("/", authenticateToken, async (req, res) => {
       return res.status(403).json({ error: "Solo los profesores pueden crear preguntas en el banco" });
     }
 
-    const { titulo, texto, opciones, correcta, tags } = req.body;
+    const { tipo, titulo, texto, opciones, correcta, tags } = req.body;
 
-    if (!titulo || !texto || !opciones || correcta === undefined) {
+    if (!texto || !opciones || correcta === undefined) {
       return res.status(400).json({ error: "Faltan campos requeridos" });
     }
 
     const question = await prisma.questionBank.create({
       data: {
         profesorId: userId,
-        titulo,
+        tipo: tipo || "multiple_choice",
+        titulo: titulo || "Sin título",
         texto,
         opciones,
         correcta,
@@ -66,7 +67,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
   try {
     const userId = (req as any).user.userId;
     const questionId = parseInt(req.params.id);
-    const { titulo, texto, opciones, correcta, tags } = req.body;
+    const { tipo, titulo, texto, opciones, correcta, tags } = req.body;
 
     const question = await prisma.questionBank.findUnique({
       where: { id: questionId }
@@ -82,7 +83,14 @@ router.put("/:id", authenticateToken, async (req, res) => {
 
     const updatedQuestion = await prisma.questionBank.update({
       where: { id: questionId },
-      data: { titulo, texto, opciones, correcta, tags: tags || question.tags }
+      data: { 
+        tipo: tipo || question.tipo,
+        titulo: titulo || question.titulo,
+        texto, 
+        opciones, 
+        correcta, 
+        tags: tags !== undefined ? tags : question.tags 
+      }
     });
 
     res.json(updatedQuestion);
