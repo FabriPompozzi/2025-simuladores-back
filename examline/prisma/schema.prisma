@@ -41,10 +41,16 @@ model Exam {
 
 model Pregunta {
   id       Int    @id @default(autoincrement())
-  tipo     String @default("multiple_choice")
+  tipo     String @default("multiple_choice") // "multiple_choice" | "true_false" | "fill_in_blank" | "matching"
   texto    String
-  opciones Json
-  correcta Int
+  opciones Json   // Array de opciones. Formato según tipo:
+                  // - multiple_choice/true_false: array simple de strings
+                  // - fill_in_blank: [respuestasCorrectas..., distractores...]
+                  // - matching: [conceptos..., respuestas...]
+  correcta Int    // Valor según tipo:
+                  // - multiple_choice/true_false: índice de la opción correcta
+                  // - fill_in_blank: cantidad de respuestas correctas (divide el array opciones)
+                  // - matching: cantidad de conceptos (divide el array opciones)
   examId   Int
   exam     Exam   @relation(fields: [examId], references: [id])
 }
@@ -138,11 +144,17 @@ model ExamFile {
 model QuestionBank {
   id        Int      @id @default(autoincrement())
   profesorId Int
-  tipo      String   @default("multiple_choice")
+  tipo      String   @default("multiple_choice") // "multiple_choice" | "true_false" | "fill_in_blank" | "matching"
   titulo    String   @default("Sin título")
   texto     String
-  opciones  Json
-  correcta  Int
+  opciones  Json     // Array de opciones. Formato según tipo:
+                    // - multiple_choice/true_false: array simple de strings
+                    // - fill_in_blank: [respuestasCorrectas..., distractores...]
+                    // - matching: [conceptos..., respuestas...]
+  correcta  Int      // Valor según tipo:
+                    // - multiple_choice/true_false: índice de la opción correcta
+                    // - fill_in_blank: cantidad de respuestas correctas (divide el array opciones)
+                    // - matching: cantidad de conceptos (divide el array opciones)
   tags      Json     @default("[]")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -294,6 +294,35 @@ const ExamAttemptRoute = (prisma: PrismaClient) => {
                   }
                 }
               }
+            } else if (pregunta.tipo === 'matching') {
+              // Para matching, la respuesta es un array donde cada índice representa un concepto
+              // y el valor es el índice de la respuesta seleccionada
+              // Formato: [respuestaParaConcepto0, respuestaParaConcepto1, ...]
+              if (Array.isArray(respuestaEstudiante) && Array.isArray(pregunta.opciones)) {
+                const numConceptos = pregunta.correcta || 0;
+                
+                // Verificar que el estudiante respondió para todos los conceptos
+                if (respuestaEstudiante.length === numConceptos) {
+                  let todasCorrectas = true;
+                  
+                  // Verificar cada emparejamiento
+                  for (let i = 0; i < numConceptos; i++) {
+                    // La respuesta correcta para el concepto i es la que está en la posición (correcta + i)
+                    const indiceRespuestaCorrecta = numConceptos + i;
+                    const indiceRespuestaEstudiante = respuestaEstudiante[i];
+                    
+                    // Comparar los índices de las respuestas
+                    if (indiceRespuestaEstudiante !== indiceRespuestaCorrecta) {
+                      todasCorrectas = false;
+                      break;
+                    }
+                  }
+                  
+                  if (todasCorrectas) {
+                    correctas++;
+                  }
+                }
+              }
             } else {
               // Para multiple_choice y true_false, comparar índice directamente
               if (respuestaEstudiante === pregunta.correcta) {
