@@ -1,11 +1,67 @@
 import { type PrismaClient } from '@prisma/client';
 import { Router } from 'express';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireRole } from '../middleware/auth';
 
 const ExamFilesRoute = (prisma: PrismaClient) => {
   const router = Router();
 
+  // 🔒 Ruta para profesores: Ver archivos de un estudiante específico
+  router.get('/:examId/student/:studentId/files', authenticateToken, requireRole(['professor']), async (req, res) => {
+    try {
+      const { examId, studentId } = req.params;
+      const profesorId = req.user!.userId;
+      const version = req.query.version || 'submission'; // Por defecto, ver versión de envío
 
+      // ✅ Verificar que el examen pertenece al profesor
+      const exam = await prisma.exam.findUnique({
+        where: { id: parseInt(examId) },
+        select: { profesorId: true }
+      });
+
+      if (!exam) {
+        return res.status(404).json({ error: 'Examen no encontrado' });
+      }
+
+      if (exam.profesorId !== profesorId) {
+        return res.status(403).json({ 
+          error: 'No tienes permisos para ver archivos de este examen',
+          code: 'NOT_OWNER'
+        });
+      }
+
+      // Obtener archivos del estudiante
+      const files = await prisma.examFile.findMany({
+        where: {
+          examId: parseInt(examId),
+          userId: parseInt(studentId),
+          version: version as string
+        },
+        select: {
+          id: true,
+          filename: true,
+          content: true,
+          version: true,
+          createdAt: true,
+          updatedAt: true,
+          user: {
+            select: {
+              id: true,
+              nombre: true,
+              email: true
+            }
+          }
+        },
+        orderBy: {
+          updatedAt: 'desc'
+        }
+      });
+
+      res.json(files);
+    } catch (error) {
+      console.error('Error fetching student files:', error);
+      res.status(500).json({ error: 'Error obteniendo archivos del estudiante' });
+    }
+  });
 
 // Obtener todos los archivos de un examen para un estudiante
 router.get('/:examId/files', authenticateToken, async (req, res) => {

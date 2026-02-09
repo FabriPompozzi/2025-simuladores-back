@@ -1,6 +1,6 @@
 import { type PrismaClient } from "@prisma/client";
 import { Router } from "express";
-import { authenticateToken, requireRole } from "../middleware/auth.ts";
+import { authenticateToken, requireRole, requireOwnership } from "../middleware/auth.ts";
 
 const ExamRoute = (prisma: PrismaClient) => {
   const router = Router();
@@ -10,7 +10,8 @@ const ExamRoute = (prisma: PrismaClient) => {
     const { 
       titulo, 
       preguntas, 
-      tipo = 'multiple_choice', 
+      tipo = 'multiple_choice',
+      ordenAleatorio = false,
       lenguajeProgramacion, 
       intellisenseHabilitado = false,
       enunciadoProgramacion,
@@ -42,6 +43,7 @@ const ExamRoute = (prisma: PrismaClient) => {
       const examData: any = {
         titulo,
         tipo,
+        ordenAleatorio,
         profesorId: req.user!.userId,
       };
 
@@ -55,6 +57,7 @@ const ExamRoute = (prisma: PrismaClient) => {
       } else if (tipo === 'multiple_choice' && preguntas) {
         examData.preguntas = {
           create: preguntas.map((p: any) => ({
+            tipo: p.tipo || 'multiple_choice',
             texto: p.texto,
             correcta: p.correcta,
             opciones: p.opciones,
@@ -121,6 +124,27 @@ const ExamRoute = (prisma: PrismaClient) => {
     if (isNaN(examId)) return res.status(400).json({ error: "examId inválido" });
 
     try {
+      // 🔒 VALIDACIÓN DE SEGURIDAD PARA PROFESORES
+      // Verificar que el profesor sea dueño del examen o que sea estudiante inscrito
+      if (req.user!.rol === 'professor') {
+        const exam = await prisma.exam.findUnique({
+          where: { id: examId },
+          select: { profesorId: true }
+        });
+
+        if (!exam) {
+          return res.status(404).json({ error: "Examen no encontrado" });
+        }
+
+        // Solo el profesor dueño puede ver su examen
+        if (exam.profesorId !== req.user!.userId) {
+          return res.status(403).json({ 
+            error: "No tienes permisos para acceder a este examen",
+            code: "NOT_OWNER" 
+          });
+        }
+      }
+
       // 🔒 VALIDACIÓN DE SEGURIDAD PARA ESTUDIANTES
       if (req.user!.rol === 'student') {
         // Requiere windowId para estudiantes
