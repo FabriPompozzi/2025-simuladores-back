@@ -241,6 +241,33 @@ const ExamRoute = (prisma: PrismaClient) => {
           update: { viewedAt: new Date() },
           create: { userId: req.user!.userId, examId },
         });
+
+        // 🔒 SEGURIDAD: NO enviar respuestas correctas ni datos de test cases
+        const sanitizedExam: any = { ...exam };
+        
+        // Eliminar respuestas correctas de preguntas (EXCEPTO para matching y fill_in_blank)
+        // Para matching y fill_in_blank, 'correcta' indica la CANTIDAD de elementos, no la respuesta
+        if (sanitizedExam.preguntas) {
+          sanitizedExam.preguntas = sanitizedExam.preguntas.map((pregunta: any) => {
+            // Para matching y fill_in_blank, mantener 'correcta' porque indica cantidad de conceptos/respuestas
+            if (pregunta.tipo === 'matching' || pregunta.tipo === 'fill_in_blank') {
+              return pregunta;
+            }
+            // Para otros tipos (multiple_choice, true_false), eliminar 'correcta'
+            const { correcta, ...preguntaSinRespuesta } = pregunta;
+            return preguntaSinRespuesta;
+          });
+        }
+        
+        // Sanitizar test cases (solo enviar descripción, no expectedOutput ni input)
+        if (sanitizedExam.testCases && Array.isArray(sanitizedExam.testCases)) {
+          sanitizedExam.testCases = sanitizedExam.testCases.map((tc: any) => ({
+            description: tc.description || 'Test case'
+            // NO enviar expectedOutput, input ni otros datos
+          }));
+        }
+        
+        return res.json(sanitizedExam);
       }
 
       res.json(exam);
